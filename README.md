@@ -22,15 +22,17 @@ The 3-terminal Steiner Exact logic implemented here serves as an optimization co
 
 In the context of drone-based quantum networks, this algorithm is utilized to replace Minimum Spanning Tree (MST) "wedges" with optimal "3-star" configurations. This substitution significantly reduces the total number of drone-based quantum repeaters required to maintain network connectivity under distance constraints.
 
-## Key Components
+## Repository Contents
 
-- **Equation (6) Solver:** An analytical approach to determine the junction point ($P_j$) that minimizes the Steiner point count for three terminals.
-- **Edge Steinernization:** A method for subdividing graph edges into segments of length at most $R$ by inserting the minimum required number of Steiner points.
-- **Geometric Normalization:** A robust transformation engine to rotate and scale terminal triangles, ensuring consistent algebraic evaluation of the optimal junction regions.
-- **Graph Integration:** Full support for `NetworkX` graph structures and `Shapely` geometric primitives for spatial analysis.
+- **[steiner_3exact.py](steiner_3exact.py)**: Implements the core 3-exact Steiner algorithm solver (`solve_3exact_steiner`) and edge subdivision routines (`calc_steinernize_MST` and `calc_steinernize_3ST`) to find the optimal junction point and count repeaters.
+- **[geometry_utils.py](geometry_utils.py)**: Contains essential 2D spatial mathematics including analytical circle-circle intersections (`circle_circle_intersection_nearest`), coordinate normalization (`normalize_points`), and Fermat point computation (`find_fermat_point`).
+- **[graph_tools.py](graph_tools.py)**: Contains NetworkX graph generation functions (such as `setup_three_point_graph` and `setup_three_star_graph`) and drawing utilities to visualize the network configurations.
+- **[steiner_3exact_tutorial.ipynb](steiner_3exact_tutorial.ipynb)**: An interactive Jupyter notebook detailing the mathematical framework, walking through test cases, and providing visual comparisons of baseline MSTs versus optimized 3-star trees.
 
 ## Requirements
 
 - `numpy`
 - `shapely`
 - `networkx`
+- `scipy`
+- `matplotlib`

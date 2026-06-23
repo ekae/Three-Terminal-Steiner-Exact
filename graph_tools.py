@@ -3,53 +3,8 @@ import math
 import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+from geometry_utils import calc_distance
 
-def setup_three_point_graph(Pa, Pb, Pc, Pf=None):
-    # Define three terminal points
-    
-
-    # Create graph and add nodes
-    G = nx.Graph()
-    G.add_node('Pa', pos=(Pa.x, Pa.y))
-    G.add_node('Pb', pos=(Pb.x, Pb.y))
-    G.add_node('Pc', pos=(Pc.x, Pc.y))
-
-    if Pf is None:
-        # Calculate distances between terminals
-        PaPb = math.dist(Pa.coords[0], Pb.coords[0])
-        PaPc = math.dist(Pa.coords[0], Pc.coords[0])
-        PbPc = math.dist(Pb.coords[0], Pc.coords[0])
-        
-        edges = [
-            (PaPb, 'Pa', 'Pb'),
-            (PaPc, 'Pa', 'Pc'),
-            (PbPc, 'Pb', 'Pc')
-        ]
-        edges.sort(key=lambda x: x[0])  # Sort by distance
-        edges = edges[:2] 
-        
-        
-    else:
-        G.add_node('Pf', pos=(Pf.x, Pf.y))
-
-        PaPf = math.dist(Pa.coords[0], Pf.coords[0])
-        PbPf = math.dist(Pb.coords[0], Pf.coords[0])
-        PcPf = math.dist(Pc.coords[0], Pf.coords[0])
-        
-        edges = [
-            (PaPf, 'Pa', 'Pf'),
-            (PbPf, 'Pb', 'Pf'),
-            (PcPf, 'Pc', 'Pf')
-        ]
-
-    # Add edges from Pf to each terminal
-    for dist, u, v in edges:
-        G.add_edge(u, v, weight=dist)
-
-
-    # finish setting up the graph and return it along with the points
-    G = finalize_graph_creation(G)
-    return G
 
 def finalize_graph_creation(G, graph_side_length=1.0, scale_pos=False):
     """
@@ -119,7 +74,7 @@ def dist(graph, node_a, node_b):
     dist = np.round(np.sqrt(np.square(dx) + np.square(dy)), 5)
     return dist
 
-def draw_graph(G, title="", disc_size=1.0, chosen_edges=None, extra_points=None, extra_discs=None, extra_discs_layers=1, show_nodes_labels=False, show_edges_label=False):
+def draw_graph(G, title="", disc_size=1.0, chosen_edges=None, extra_points=None, extra_discs=None, extra_discs_layers=1):
     """
     A professional visualization tool for the network graph G.
     Displays terminal nodes with extra nodes and communication radii.
@@ -133,29 +88,32 @@ def draw_graph(G, title="", disc_size=1.0, chosen_edges=None, extra_points=None,
     :param extra_discs_layers: Number of concentric layers for the discs.
     """
     pos = get_pos(G)
-    length = nx.get_edge_attributes(G, 'length')
     
-    fig, ax = plt.subplots(figsize=(10, 10))
-    # fig, ax = plt.figure(figsize=(8, 8))
+    fig, ax = plt.subplots()
     
                                
     # Draw  Nodes
     nx.draw_networkx_nodes(G, pos, nodelist=G.nodes(), node_size=300, 
-                            node_color='white', edgecolors='black')
+                            node_color='white', edgecolors='black', label="Ground Node")
 
     # Draw Standard Edges
     nx.draw_networkx_edges(G, pos, width=0.5, alpha=0.5)
     
+    
+    ############ TEST PURPOSE ###########
+    node_labels = {}
+    node_pos = nx.get_node_attributes(G, 'pos')
+    label_pos = node_pos
+    for node, nodedata in G.nodes.items():
+        node_labels[node] = node
+                
+    nx.draw_networkx_labels(G=G, pos=label_pos, labels=node_labels, font_size=12, 
+                                font_weight="bold", font_color="k", font_family='serif')
+    
+    
     # Highlight Edges
     if chosen_edges:
         nx.draw_networkx_edges(G, pos, edgelist=chosen_edges, edge_color="#2CBAFA", width=2.5)
-
-    if show_nodes_labels:
-        labels = {node: node for node in G.nodes()}
-        nx.draw_networkx_labels(G=G, pos=pos, labels=labels, font_size=10, font_color='black')
-
-    if show_edges_label:
-            nx.draw_networkx_edge_labels(G=G, pos=pos, edge_labels=length)
 
     # Draw Extra Points
     if extra_points:
@@ -169,22 +127,14 @@ def draw_graph(G, title="", disc_size=1.0, chosen_edges=None, extra_points=None,
             # Handle List: [[x1, y1], [x2, y2]]
             for point in extra_points:
                 ax.scatter(*point, s=50, edgecolor='b', facecolor='b', marker='s')
-            
-    # Draw coverage Discs
-    if extra_discs:
-        for disc_center in extra_discs:
-            for i in range(extra_discs_layers):
-                circle = Circle(disc_center, radius=disc_size*(i+1), edgecolor='blue', facecolor='none', linestyle='--', alpha=0.3)
-                ax.add_patch(circle)
-    
-    
-    plt.axis('equal')
+
     ax.set_title(title)
     ax.set_aspect('equal')
-    # plt.tight_layout()
+    plt.legend()
+    plt.tight_layout()
     plt.show()
 
-def draw_triangural(graph, title="", disc_size=1, chosen_edges=[], chosen_edges2=[], updated_edges=[], chosen_nodes=[], chosen_nodes2=[], extra_points=[], extra_points_dict={}, convex_discs=[], convex_discs2=[], show_node_label = True, show_edge_label=True):
+def draw_point(G, title="", disc_size=1.0, extra_points=None, extra_discs=None, extra_discs_layers=1, extra_vh_line=[], show_node_label = True, show_edges=False, show_edge_label=False):
     """
     Draws the input graph.
 
@@ -196,114 +146,64 @@ def draw_triangural(graph, title="", disc_size=1, chosen_edges=[], chosen_edges2
     Returns:
         None
     """
-    node_pos = nx.get_node_attributes(graph, 'pos')
-    edge_pos = node_pos
-    label_pos = node_pos #pos_nudge(node_pos, 0.002, 0.002, nx.diameter(graph))
-    length = nx.get_edge_attributes(graph, 'length')
     
-    none_type_node = []
-    repeater_nodes = []
-    end_nodes = []
-    
+    pos = get_pos(G)
     node_labels = {}
-    end_node_labels = {}
-    repeater_node_labels = {}
-    chosen_node_labels = {}
-    chosen_node_labels2 = {}
+    for node, nodedata in G.nodes.items():
+        node_labels[node] = node      
     
-    for node, nodedata in graph.nodes.items():
-        if not nodedata['type']:
-            none_type_node.append(node)
-            if show_node_label:
-                node_labels[node] = node
-        else:
-            if nodedata['type'] == 'repeater_node':
-                repeater_nodes.append(node)
-                if show_node_label:
-                    repeater_node_labels[node] = node
-            elif nodedata['type'] == 'steiner_node':
-                repeater_nodes.append(node)
-                if show_node_label:
-                    repeater_node_labels[node] = node
-            elif nodedata['type'] == 'end_node':
-                end_nodes.append(node)
-                if show_node_label:
-                    end_node_labels[node] = node
-            else:
-                NotImplementedError(f"Unknowed node type: {nodedata['type']}")
-        
-        if node in chosen_nodes:
-            chosen_node_labels[node] = node
-        if node in chosen_nodes2:
-            chosen_node_labels2[node] = node
+    length = nx.get_edge_attributes(G, 'length')
+    fig, ax = plt.subplots()
+
+    # Draw  Nodes
+    nx.draw_networkx_nodes(G, pos, nodelist=G.nodes(), node_size=300, 
+                            node_color='white', edgecolors='black', label="Ground Node")
+    # Draw Standard Edges
+    if show_edges:
+        nx.draw_networkx_edges(G, pos, width=0.5, alpha=0.5)
     
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # Write Node Labels
+    if show_node_label:
+            nx.draw_networkx_labels(G=G, pos=pos, labels=node_labels, font_size=12, 
+                                    font_weight="bold", font_color="k", font_family='serif')
     
-    #draw nodes
-    if end_nodes:
-        end_nodes = nx.draw_networkx_nodes(G=graph, pos=node_pos, nodelist=end_nodes, node_shape='s', node_size=750,
-                                       node_color=[[1.0, 120 / 255, 0.]], label="End Node", linewidths=3)
-        end_nodes.set_edgecolor(["k"])
-        if end_node_labels:
-            nx.draw_networkx_labels(G=graph, pos=label_pos, labels=end_node_labels, font_size=20, 
-                                font_weight="bold", font_color="b", font_family='serif')
-    if repeater_nodes:
-        rep_nodes = nx.draw_networkx_nodes(G=graph, pos=node_pos, nodelist=repeater_nodes, node_size=350,
-                                       node_color=[[1, 1, 1]], label="Repeater Node")
-        rep_nodes.set_edgecolor(["k"])
-        if repeater_node_labels:
-            nx.draw_networkx_labels(G=graph, pos=label_pos, labels=repeater_node_labels, font_size=12, font_weight="bold") #12
-        
-    if chosen_nodes:
-        chosen_nodes = nx.draw_networkx_nodes(G=graph, pos=node_pos, nodelist=chosen_nodes, node_size=750,
-                                       node_color="#2CBAFA", label="Chosen Node")
-        chosen_nodes.set_edgecolor(["k"])
-        # if chosen_node_labels and show_node_label:
-        #     nx.draw_networkx_labels(G=graph, pos=label_pos, labels=chosen_node_labels, font_size=20, 
-        #                             font_weight="bold", font_color="k", font_family='serif')
-            
-    if chosen_nodes2:
-        chosen_nodes2 = nx.draw_networkx_nodes(G=graph, pos=node_pos, nodelist=chosen_nodes2, node_size=750,
-                                   node_color="#F98181", label="Chosen Node2")
-        chosen_nodes2.set_edgecolor(["k"])
-        # if chosen_node_labels2 and show_node_label:
-        #     nx.draw_networkx_labels(G=graph, pos=label_pos, labels=chosen_node_labels2, font_size=20, 
-        #                             font_weight="bold", font_color="k", font_family='serif')
-    
-    if extra_points:
-        for point in extra_points:
-            # extra_node = Circle(point, radius=0.2, edgecolor='b', facecolor='none')
-            ax.scatter(*point, s=200, edgecolor='b', facecolor='none', marker='s')  # Change marker here
-            
-    if extra_points_dict:
-        for point in extra_points_dict:
-            # extra_node = Circle(point, radius=0.2, edgecolor='b', facecolor='none')
-            plt.text(extra_points_dict[point][0], extra_points_dict[point][1], point, fontsize=12, color='red')
-            ax.scatter(*extra_points_dict[point], s=200, edgecolor='b', facecolor='none', marker='s')  # Change marker here
-            
-    if convex_discs:
-        for convex_i in range(1, convex_discs[0]+1):
-            cover = Circle(convex_discs[1], radius=convex_i*disc_size, edgecolor='b', facecolor='none')
-            ax.add_patch(cover)
-    if convex_discs2:
-        for convex_i in range(1, convex_discs2[0]+1):
-            cover = Circle(convex_discs2[1], radius=convex_i*disc_size, edgecolor='y', facecolor='none')
-            ax.add_patch(cover)
-    
-    #draw edges
-    
-    nx.draw_networkx_edges(G=graph, pos=node_pos, width=1, node_size=750)
+    # Write Edge Labels
     if show_edge_label:
-        nx.draw_networkx_edge_labels(G=graph, pos=node_pos, edge_labels=length, font_size=8) #12
-    if chosen_edges:
-        nx.draw_networkx_edges(G=graph, pos=node_pos, edgelist=chosen_edges, edge_color="#2CBAFA", width=3, node_size=750)
-    if chosen_edges2:
-        nx.draw_networkx_edges(G=graph, pos=node_pos, edgelist=chosen_edges2, edge_color="#2CFFFA", width=3, node_size=750)
+        # prevent displaying 0.0 length edges
+        filtered_length = {k: v for k, v in length.items() if float(v) > 0.0}
+        nx.draw_networkx_edge_labels(G=G, pos=pos, edge_labels=filtered_length)
+        
+    # Draw Extra Points
+    if extra_points:
+        if isinstance(extra_points, dict):
+            # Handle Dictionary: { 'name': [x, y] }
+            for name, coords in extra_points.items():
+                ax.scatter(*coords, s=150, edgecolor='b', facecolor='none', marker='.')
+                plt.text(coords[0], coords[1], name, fontsize=12, color='red')
+
+        elif isinstance(extra_points, list):
+            # Handle List: [[x1, y1], [x2, y2]]
+            for point in extra_points:
+                ax.scatter(*point, s=50, edgecolor='b', facecolor='b', marker='s')
+    
+    # Draw coverage Discs
+    if extra_discs:
+        for disc_center in extra_discs:
+            for i in range(extra_discs_layers):
+                circle = Circle(disc_center, radius=disc_size*(i+1), edgecolor='blue', facecolor='none', linestyle='--', alpha=0.3)
+                ax.add_patch(circle)
+    
+    # Draw_Lines
+    if extra_vh_line:
+        for x in extra_vh_line[0]:
+            plt.axvline(x, color='b', linestyle='--')
+        for y in extra_vh_line[1]:
+            plt.axhline(y, color='r', linestyle='--')
             
-    ax.set_title(title, fontsize=15)   
+    ax.set_title(title, fontsize=14, fontweight='bold')   
     ax.set_aspect(1)
     ax.axis('equal') 
-    ax.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True, labelsize=20)
+    ax.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
     plt.axis('on')
     fig.tight_layout()
     plt.show()
@@ -350,3 +250,67 @@ def write_tsplib_graph(G, name="network", filepath="output.tsp"):
             x, y = G.nodes[node]['pos']
             f.write(f"{i} {x:.5e} {y:.5e}\n")
         f.write("EOF\n")
+
+def setup_three_point_graph(A, B, C):
+    """
+    Create a graph connecting three points (A, B, C) with edges.
+
+    This function initializes a graph with three nodes representing the points A, B, and C.
+    It connects the nodes with the two shorter edges of the three possible edges
+    connecting the points A, B, and C.
+
+    :param A: The first point with attributes x and y.
+    :param B: The second point with attributes x and y.
+    :param C: The third point with attributes x and y.
+    :return: A NetworkX graph with three nodes and two edges.
+    """
+    G = nx.Graph()
+    G.add_node('Pa', pos=(A[0], A[1]))
+    G.add_node('Pb', pos=(B[0], B[1]))
+    G.add_node('Pc', pos=(C[0], C[1]))
+    
+    # Calculate all pairwise distances
+    d_ab = calc_distance(A, B)
+    d_bc = calc_distance(B, C)
+    d_ac = calc_distance(A, C)
+    
+    # Define candidates for edges
+    candidates = [
+        ('Pa', 'Pb', d_ab),
+        ('Pb', 'Pc', d_bc),
+        ('Pa', 'Pc', d_ac)
+    ]
+    
+    # Sort candidates by distance (length) in ascending order
+    candidates.sort(key=lambda x: x[2])
+    
+    # Add only the two shorter edges
+    G.add_edge(candidates[0][0], candidates[0][1], length=candidates[0][2])
+    G.add_edge(candidates[1][0], candidates[1][1], length=candidates[1][2])
+    
+    G = finalize_graph_creation(G)
+    return G
+
+def setup_three_star_graph(pa, pb, pc, pj):
+    """
+    pcreate a graph connecting three points (pa, pb, pc) to a central junction point (pj).
+
+    This function initializes a graph with four nodes representing the points pa, pb, pc, and pj.
+    It connects the nodes pa, pb, and pc to the central junction node pj, forming a star topology.
+
+    :param pa: The first point with attributes x and y.
+    :param pb: The second point with attributes x and y.
+    :param pc: The third point with attributes x and y.
+    :param pj: The junction point with attributes x and y.
+    :return: pa NetworkX graph with four nodes and three edges.
+    """
+    G = nx.Graph()
+    G.add_node('Pb', pos=(pa[0], pa[1]))
+    G.add_node('Pa', pos=(pb[0], pb[1]))
+    G.add_node('Pc', pos=(pc[0], pc[1]))
+    G.add_node('pj', pos=(pj[0], pj[1]))
+    G.add_edge('Pa', 'pj')
+    G.add_edge('Pb', 'pj')
+    G.add_edge('Pc', 'pj')
+    G = finalize_graph_creation(G)
+    return G
