@@ -122,31 +122,89 @@ def _calc_eq6_feasibility(pa, pb, pc, i, j, k, t, d_max, DEBUG_MODE=False):
         valid_roots = [r.real for r in raw_roots if abs(r.imag) < 1e-7]
         
         # --- FIX 3: Polish Roots via Local Refinement ---
-        def unexpanded_target(x):
-            term1 = a2 * (x**2) + a1 * x + a0
-            # Corrected invalid square root math
-            inner = s * (r_n * (x**2) - x)
-            term2 = 4.0 * ya * np.sqrt(max(0.0, inner))
-            return term1 - term2
-
         polished_roots = []
         for r in valid_roots:
+            inner_r = s * (r_n * (r**2) - r)
+            term2_r = 4.0 * abs(ya) * np.sqrt(max(0.0, inner_r))
+            term1_r = a2 * (r**2) + a1 * r + a0
+            
+            # Select target function depending on the branch of the root
+            if abs(term1_r - term2_r) < abs(term1_r + term2_r):
+                target = lambda x: (a2 * (x**2) + a1 * x + a0) - 4.0 * abs(ya) * np.sqrt(max(0.0, s * (r_n * (x**2) - x)))
+            else:
+                target = lambda x: (a2 * (x**2) + a1 * x + a0) + 4.0 * abs(ya) * np.sqrt(max(0.0, s * (r_n * (x**2) - x)))
+            
             try:
-                refined = opt.newton(unexpanded_target, r, tol=1e-12, maxiter=50)
+                refined = opt.newton(target, r, tol=1e-12, maxiter=50)
                 polished_roots.append(refined)
             except (RuntimeError, ZeroDivisionError):
                 polished_roots.append(r)
 
-        # roots = valid_roots 
         roots = sorted(list(set(polished_roots)))
         
         # 4. Final translation step
         sub = (j + k) / 2.0 + 1.0 / (2.0 * r_n)
 
-        return roots, sub, xa, ya, r_n, unexpanded_target
+        return roots, sub, xa, ya, r_n, a2, a1, a0, s
 
-    # Execute geometric extraction
-    roots, sub, xa, ya, r_n, unexpanded_target = solve_geometric_quartic(pa, pb, pc, d_max, j, k, t)
+    def solve_geometric_quartic_test(pa, pb, pc, d_max, j, k, t):
+        # 1. Normalize points to preserve bit precision
+        pa_n, pb_n, pc_n, r_n = normalize_points((pa[0], pa[1]), (pb[0], pb[1]), (pc[0], pc[1]), d_max)
+        xa, ya = pa_n[0], pa_n[1]
+        
+        # 2. Corrected Intermediate terms
+        a = (((j - k) * r_n) + 1.0) / 2.0
+        b_prime = 1.0 - a - xa
+        s = a * (1.0 - a) * r_n
+        c0_prime = r_n * t + 1.0
+        m = (2.0 * a - 1.0) * r_n
+        
+        a2 = m**2 + 4.0 * s * r_n - 4.0 * r_n**2
+        a1 = 2.0 * m * b_prime - 4.0 * s + 4.0 * r_n * c0_prime
+        a0 = b_prime**2 + ya**2 - c0_prime**2
+        
+        # 3. Corrected raw algebraic coefficients
+        coeffs = np.array([
+            a2**2, 
+            2.0 * a2 * a1, 
+            a1**2 + 2.0 * a2 * a0 - 16.0 * (ya**2) * s * r_n, 
+            2.0 * a1 * a0 + 16.0 * (ya**2) * s, 
+            a0**2
+        ], dtype=np.float64)
+
+        # --- Solve analytically using our test solver ---
+        raw_roots = solve_quartic_analytical(coeffs)
+        valid_roots = [r.real for r in raw_roots if abs(r.imag) < 1e-7]
+        
+        # --- Polish Roots via Local Refinement ---
+        polished_roots = []
+        for r in valid_roots:
+            inner_r = s * (r_n * (r**2) - r)
+            term2_r = 4.0 * abs(ya) * np.sqrt(max(0.0, inner_r))
+            term1_r = a2 * (r**2) + a1 * r + a0
+            
+            # Select target function depending on the branch of the root
+            if abs(term1_r - term2_r) < abs(term1_r + term2_r):
+                target = lambda x: (a2 * (x**2) + a1 * x + a0) - 4.0 * abs(ya) * np.sqrt(max(0.0, s * (r_n * (x**2) - x)))
+            else:
+                target = lambda x: (a2 * (x**2) + a1 * x + a0) + 4.0 * abs(ya) * np.sqrt(max(0.0, s * (r_n * (x**2) - x)))
+            
+            try:
+                refined = opt.newton(target, r, tol=1e-12, maxiter=50)
+                polished_roots.append(refined)
+            except (RuntimeError, ZeroDivisionError):
+                polished_roots.append(r)
+
+        roots = sorted(list(set(polished_roots)))
+        
+        # 4. Final translation step
+        sub = (j + k) / 2.0 + 1.0 / (2.0 * r_n)
+
+        return roots, sub, xa, ya, r_n, a2, a1, a0, s
+
+    # Execute geometric extraction (Toggle between solve_geometric_quartic and solve_geometric_quartic_test)
+    roots, sub, xa, ya, r_n, a2, a1, a0, s = solve_geometric_quartic_test(pa, pb, pc, d_max, j, k, t)
+    # roots, sub, xa, ya, r_n, a2, a1, a0, s = solve_geometric_quartic(pa, pb, pc, d_max, j, k, t)
 
     # Track solutions
     for idx in range(len(roots) - 1):
@@ -157,12 +215,16 @@ def _calc_eq6_feasibility(pa, pb, pc, i, j, k, t, d_max, DEBUG_MODE=False):
 
         mid = (roots[idx] + roots[idx+1]) / 2.0
         
-        # --- FIX 4: Avoid np.polyval. Check structural feasibility on unexpanded relation ---
-        if unexpanded_target(mid) <= 1e-7:
+        # Check structural feasibility on unexpanded relation using absolute values
+        inner_mid = s * (r_n * (mid**2) - mid)
+        term2_mid = 4.0 * abs(ya) * np.sqrt(max(0.0, inner_mid))
+        term1_mid = a2 * (mid**2) + a1 * mid + a0
+        
+        if abs(term1_mid) <= term2_mid + 1e-7:
             
-            # --- FIX 5: Protect range limits from epsilon micro-clipping ---
-            lower_bound = math.floor(roots[idx] - sub + 1e-9)
-            upper_bound = math.ceil(roots[idx+1] - sub - 1e-9)
+            # Protect range limits from epsilon micro-clipping using mathematically correct bounds
+            lower_bound = math.ceil(roots[idx] - sub - 1e-9)
+            upper_bound = math.floor(roots[idx+1] - sub + 1e-9)
             
             for z in range(lower_bound, upper_bound + 1):
                 ci, cj, ck = i - 2*z, j + z, k + z
@@ -292,3 +354,164 @@ def calc_steinernize_3ST(Pa, Pb, Pc, Px, R=1):
             
     total_steiners = len(extra_steiners) + 1 # +1 for the center Steiner point Px
     return total_steiners, extra_steiners
+
+def solve_quartic_analytical(coeffs):
+    """
+    Solves a quartic equation analytically using Ferrari's method and Cardano's formula.
+    coeffs = [c4, c3, c2, c1, c0] corresponding to c4*x^4 + c3*x^3 + c2*x^2 + c1*x + c0 = 0.
+    Returns a list of complex/real roots.
+    """
+    c4 = float(coeffs[0])
+    if abs(c4) < 1e-15:
+        return solve_cubic_analytical(coeffs[1:])
+        
+    b = float(coeffs[1]) / c4
+    c = float(coeffs[2]) / c4
+    d = float(coeffs[3]) / c4
+    e = float(coeffs[4]) / c4
+    
+    b2 = b * b
+    p = c - 3.0 * b2 / 8.0
+    q = d - b * c / 2.0 + b2 * b / 8.0
+    r = e - b * d / 4.0 + b2 * c / 16.0 - 3.0 * b2 * b2 / 256.0
+    
+    if abs(q) < 1e-12:
+        disc = p * p - 4.0 * r
+        roots_y = []
+        if disc >= 0:
+            sqrt_disc = math.sqrt(disc)
+            z1 = (-p + sqrt_disc) / 2.0
+            z2 = (-p - sqrt_disc) / 2.0
+            for z in (z1, z2):
+                if z >= 0:
+                    roots_y.extend([math.sqrt(z), -math.sqrt(z)])
+                else:
+                    val = math.sqrt(-z)
+                    roots_y.extend([complex(0, val), complex(0, -val)])
+        else:
+            z1 = complex(-p / 2.0, math.sqrt(-disc) / 2.0)
+            z2 = complex(-p / 2.0, -math.sqrt(-disc) / 2.0)
+            roots_y.extend([np.sqrt(z1), -np.sqrt(z1), np.sqrt(z2), -np.sqrt(z2)])
+        
+        return [y - b / 4.0 for y in roots_y]
+        
+    A_c = -p / 2.0
+    B_c = -r
+    C_c = (r * p) / 2.0 - (q * q) / 8.0
+    
+    A_c2 = A_c * A_c
+    a_val = (3.0 * B_c - A_c2) / 9.0
+    b_val = (27.0 * C_c - 9.0 * A_c * B_c + 2.0 * A_c2 * A_c) / 54.0
+    
+    disc_c = a_val * a_val * a_val + b_val * b_val
+    
+    if disc_c > 0:
+        sqrt_disc = math.sqrt(disc_c)
+        u = -b_val + sqrt_disc
+        v = -b_val - sqrt_disc
+        u_root = math.copysign(abs(u) ** (1.0 / 3.0), u)
+        v_root = math.copysign(abs(v) ** (1.0 / 3.0), v)
+        w = u_root + v_root
+        m = w - A_c / 3.0
+    else:
+        if a_val < 0:
+            r_c = math.sqrt(-a_val * a_val * a_val)
+            cos_val = max(-1.0, min(1.0, -b_val / r_c))
+            theta = math.acos(cos_val) / 3.0
+            sqrt_neg_a = math.sqrt(-a_val)
+            
+            w0 = 2.0 * sqrt_neg_a * math.cos(theta)
+            w1 = 2.0 * sqrt_neg_a * math.cos(theta + 2.0 * math.pi / 3.0)
+            w2 = 2.0 * sqrt_neg_a * math.cos(theta + 4.0 * math.pi / 3.0)
+            
+            m = max(w0, w1, w2) - A_c / 3.0
+        else:
+            m = -A_c / 3.0
+            
+    m = max(1e-15, m)
+    sqrt_2m = math.sqrt(2.0 * m)
+    
+    h1 = p / 2.0 + m - q / (2.0 * sqrt_2m)
+    h2 = p / 2.0 + m + q / (2.0 * sqrt_2m)
+    
+    roots_y = []
+    disc1 = 2.0 * m - 4.0 * h1
+    if disc1 >= 0:
+        sqrt_disc1 = math.sqrt(disc1)
+        roots_y.append((-sqrt_2m + sqrt_disc1) / 2.0)
+        roots_y.append((-sqrt_2m - sqrt_disc1) / 2.0)
+    else:
+        sqrt_neg_disc1 = math.sqrt(-disc1)
+        roots_y.append(complex(-sqrt_2m / 2.0, sqrt_neg_disc1 / 2.0))
+        roots_y.append(complex(-sqrt_2m / 2.0, -sqrt_neg_disc1 / 2.0))
+        
+    disc2 = 2.0 * m - 4.0 * h2
+    if disc2 >= 0:
+        sqrt_disc2 = math.sqrt(disc2)
+        roots_y.append((sqrt_2m + sqrt_disc2) / 2.0)
+        roots_y.append((sqrt_2m - sqrt_disc2) / 2.0)
+    else:
+        sqrt_neg_disc2 = math.sqrt(-disc2)
+        roots_y.append(complex(sqrt_2m / 2.0, sqrt_neg_disc2 / 2.0))
+        roots_y.append(complex(sqrt_2m / 2.0, -sqrt_neg_disc2 / 2.0))
+        
+    return [y - b / 4.0 for y in roots_y]
+
+def solve_cubic_analytical(coeffs):
+    """
+    Solves a cubic equation analytically: coeffs = [c3, c2, c1, c0] for c3*x^3 + c2*x^2 + c1*x + c0 = 0.
+    """
+    c3 = float(coeffs[0])
+    if abs(c3) < 1e-15:
+        return solve_quadratic_analytical(coeffs[1:])
+    
+    a = float(coeffs[1]) / c3
+    b = float(coeffs[2]) / c3
+    c = float(coeffs[3]) / c3
+    
+    p = (3.0 * b - a * a) / 9.0
+    q = (27.0 * c - 9.0 * a * b + 2.0 * a**3) / 54.0
+    
+    disc = p**3 + q**2
+    roots_w = []
+    if disc > 0:
+        sqrt_disc = math.sqrt(disc)
+        u = -q + sqrt_disc
+        v = -q - sqrt_disc
+        u_root = math.copysign(abs(u) ** (1.0 / 3.0), u)
+        v_root = math.copysign(abs(v) ** (1.0 / 3.0), v)
+        roots_w.append(u_root + v_root)
+    else:
+        if p < 0:
+            r = math.sqrt(-p**3)
+            cos_val = max(-1.0, min(1.0, -q / r))
+            theta = math.acos(cos_val) / 3.0
+            sqrt_neg_p = math.sqrt(-p)
+            roots_w.append(2.0 * sqrt_neg_p * math.cos(theta))
+            roots_w.append(2.0 * sqrt_neg_p * math.cos(theta + 2.0 * math.pi / 3.0))
+            roots_w.append(2.0 * sqrt_neg_p * math.cos(theta + 4.0 * math.pi / 3.0))
+        else:
+            roots_w.append(-q ** (1.0 / 3.0) if q >= 0 else (-q) ** (1.0 / 3.0))
+            
+    return [w - a / 3.0 for w in roots_w]
+
+def solve_quadratic_analytical(coeffs):
+    """
+    Solves a quadratic equation: coeffs = [c2, c1, c0] for c2*x^2 + c1*x + c0 = 0.
+    """
+    c2 = float(coeffs[0])
+    if abs(c2) < 1e-15:
+        c1 = float(coeffs[1])
+        if abs(c1) < 1e-15:
+            return []
+        return [-float(coeffs[2]) / c1]
+    
+    b = float(coeffs[1]) / c2
+    c = float(coeffs[2]) / c2
+    disc = b * b - 4.0 * c
+    if disc >= 0:
+        sqrt_disc = math.sqrt(disc)
+        return [(-b + sqrt_disc) / 2.0, (-b - sqrt_disc) / 2.0]
+    else:
+        sqrt_neg_disc = math.sqrt(-disc)
+        return [complex(-b / 2.0, sqrt_neg_disc / 2.0), complex(-b / 2.0, -sqrt_neg_disc / 2.0)]
