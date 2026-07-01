@@ -84,70 +84,8 @@ def _calc_eq6_feasibility(pa, pb, pc, i, j, k, t, d_max, DEBUG_MODE=False):
     Checks if a discrete hop count configuration is feasible by root finding.
     Safeguarded against companion matrix degradation and polynomial expansion pitfalls.
     """
-    
+
     def solve_geometric_quartic(pa, pb, pc, d_max, j, k, t):
-        # 1. Normalize points to preserve bit precision
-        pa_n, pb_n, pc_n, r_n = normalize_points((pa[0], pa[1]), (pb[0], pb[1]), (pc[0], pc[1]), d_max)
-        xa, ya = pa_n[0], pa_n[1]
-        
-        # 2. Corrected Intermediate terms
-        a = (((j - k) * r_n) + 1.0) / 2.0
-        b_prime = 1.0 - a - xa
-        s = a * (1.0 - a) * r_n
-        c0_prime = r_n * t + 1.0
-        m = (2.0 * a - 1.0) * r_n
-        
-        a2 = m**2 + 4.0 * s * r_n - 4.0 * r_n**2
-        a1 = 2.0 * m * b_prime - 4.0 * s + 4.0 * r_n * c0_prime
-        a0 = b_prime**2 + ya**2 - c0_prime**2
-        
-        # 3. Corrected raw algebraic coefficients
-        coeffs = np.array([
-            a2**2, 
-            2.0 * a2 * a1, 
-            a1**2 + 2.0 * a2 * a0 - 16.0 * (ya**2) * s * r_n, 
-            2.0 * a1 * a0 + 16.0 * (ya**2) * s, 
-            a0**2
-        ], dtype=np.float64)
-
-        # --- FIX 1: Balance Coefficients (Conditioning the Companion Matrix) ---
-        max_coeff = np.max(np.abs(coeffs))
-        if max_coeff > 0:
-            coeffs_conditioned = coeffs / max_coeff
-        else:
-            coeffs_conditioned = coeffs
-
-        # --- FIX 2: Loosen Imaginary Threshold to 1e-7 ---
-        raw_roots = np.roots(coeffs_conditioned)
-        valid_roots = [r.real for r in raw_roots if abs(r.imag) < 1e-7]
-        
-        # --- FIX 3: Polish Roots via Local Refinement ---
-        polished_roots = []
-        for r in valid_roots:
-            inner_r = s * (r_n * (r**2) - r)
-            term2_r = 4.0 * abs(ya) * np.sqrt(max(0.0, inner_r))
-            term1_r = a2 * (r**2) + a1 * r + a0
-            
-            # Select target function depending on the branch of the root
-            if abs(term1_r - term2_r) < abs(term1_r + term2_r):
-                target = lambda x: (a2 * (x**2) + a1 * x + a0) - 4.0 * abs(ya) * np.sqrt(max(0.0, s * (r_n * (x**2) - x)))
-            else:
-                target = lambda x: (a2 * (x**2) + a1 * x + a0) + 4.0 * abs(ya) * np.sqrt(max(0.0, s * (r_n * (x**2) - x)))
-            
-            try:
-                refined = opt.newton(target, r, tol=1e-12, maxiter=50)
-                polished_roots.append(refined)
-            except (RuntimeError, ZeroDivisionError):
-                polished_roots.append(r)
-
-        roots = sorted(list(set(polished_roots)))
-        
-        # 4. Final translation step
-        sub = (j + k) / 2.0 + 1.0 / (2.0 * r_n)
-
-        return roots, sub, xa, ya, r_n, a2, a1, a0, s
-
-    def solve_geometric_quartic_test(pa, pb, pc, d_max, j, k, t):
         # 1. Normalize points to preserve bit precision
         pa_n, pb_n, pc_n, r_n = normalize_points((pa[0], pa[1]), (pb[0], pb[1]), (pc[0], pc[1]), d_max)
         xa, ya = pa_n[0], pa_n[1]
@@ -203,9 +141,8 @@ def _calc_eq6_feasibility(pa, pb, pc, i, j, k, t, d_max, DEBUG_MODE=False):
         return roots, sub, xa, ya, r_n, a2, a1, a0, s
 
     # Execute geometric extraction (Toggle between solve_geometric_quartic and solve_geometric_quartic_test)
-    roots, sub, xa, ya, r_n, a2, a1, a0, s = solve_geometric_quartic_test(pa, pb, pc, d_max, j, k, t)
-    # roots, sub, xa, ya, r_n, a2, a1, a0, s = solve_geometric_quartic(pa, pb, pc, d_max, j, k, t)
-
+    roots, sub, xa, ya, r_n, a2, a1, a0, s = solve_geometric_quartic(pa, pb, pc, d_max, j, k, t)
+    
     # Track solutions
     for idx in range(len(roots) - 1):
 

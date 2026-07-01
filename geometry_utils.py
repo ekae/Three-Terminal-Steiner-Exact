@@ -92,8 +92,7 @@ def calc_distance(p1, p2):
     """
     Calculate the Euclidean distance between two coordinate tuples.
     """
-    return math.dist(p1, p2) #math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
-
+    return math.dist(p1, p2)
 def triangle_angles(A, B, C):
     """
     Calculate all angles of a triangle formed by points A, B, and C.
